@@ -1,13 +1,11 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.decomposition import PCA
+from sklearn.metrics import silhouette_score
 import os
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report, confusion_matrix, roc_auc_score, roc_curve
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder
-from sklearn.ensemble import RandomForestClassifier
-import time
 
 # Load dataset
 df = pd.read_csv("healthcare-dataset-stroke-data.csv")
@@ -16,81 +14,71 @@ df = pd.read_csv("healthcare-dataset-stroke-data.csv")
 df.drop("id", axis=1, inplace=True)
 df['bmi'] = df['bmi'].fillna(df['bmi'].median())
 
-# Encode categorical data
+# Encode categorical features
 categorical_cols = ['gender', 'ever_married', 'work_type', 'Residence_type', 'smoking_status']
 for col in categorical_cols:
     le = LabelEncoder()
     df[col] = le.fit_transform(df[col])
 
-# Split features and target
-X = df.drop("stroke", axis=1)
-y = df["stroke"]
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+# Normalize numerical features
+numerical_cols = ['age', 'avg_glucose_level', 'bmi']
+scaler = StandardScaler()
+df[numerical_cols] = scaler.fit_transform(df[numerical_cols])
 
-# Train Random Forest model
-model = RandomForestClassifier(n_estimators=100, random_state=42)
+# Elbow Method
+inertia = []
+K = range(1, 10)
+for k in K:
+    kmeans = KMeans(n_clusters=k, random_state=42)
+    kmeans.fit(df.drop('stroke', axis=1))
+    inertia.append(kmeans.inertia_)
 
-# Record start time
-start_time = time.time()
+plt.figure(figsize=(6, 4))
+plt.plot(K, inertia, 'bo-')
+plt.title('Elbow Method')
+plt.xlabel('Number of clusters')
+plt.ylabel('Inertia')
+plt.savefig('visualisasi/elbow_method.png')
 
-# Train the model
-model.fit(X_train, y_train)
+# Clustering with optimal K (misal K=3)
+kmeans = KMeans(n_clusters=3, random_state=42)
+df['cluster'] = kmeans.fit_predict(df.drop('stroke', axis=1))
 
-# Record end time
-end_time = time.time()
+# Silhouette Score
+silhouette_avg = silhouette_score(df.drop(['stroke', 'cluster'], axis=1), df['cluster'])
+print(f"Silhouette Score: {silhouette_avg:.4f}")
 
-# Calculate training duration
-training_time = end_time - start_time
-print(f"Waktu pelatihan model: {training_time:.2f} detik")
+# Visualize clusters with PCA
+pca = PCA(n_components=2)
+principal_components = pca.fit_transform(df.drop(['stroke', 'cluster'], axis=1))
+df['pc1'] = principal_components[:, 0]
+df['pc2'] = principal_components[:, 1]
 
-# Evaluate model
-y_pred = model.predict(X_test)
-y_prob = model.predict_proba(X_test)[:, 1]
+plt.figure(figsize=(8, 6))
+plt.scatter(df['pc1'], df['pc2'], c=df['cluster'], cmap='viridis')
+plt.title('Cluster Visualization')
+plt.xlabel('Principal Component 1')
+plt.ylabel('Principal Component 2')
+plt.colorbar(label='Cluster')
+plt.savefig('visualisasi/visualisasi_clustering.png')
 
-# Print classification report
-print(classification_report(y_test, y_pred))
+# Analyze cluster characteristics
+cluster_means = df.groupby('cluster')[numerical_cols].mean()
+print("\nRata-rata Fitur per Cluster:\n", cluster_means)
 
-# Create folder for visualizations
-os.makedirs("visualisasi", exist_ok=True)
+# Visualize feature contributions
+cluster_means.plot(kind='bar', figsize=(10, 6))
+plt.title('Feature Means per Cluster')
+plt.ylabel('Mean Value')
+plt.savefig('visualisasi/feature_means_per_cluster.png')
 
-# Confusion Matrix visualization
-plt.figure(figsize=(6,5))
-sns.heatmap(confusion_matrix(y_test, y_pred), annot=True, fmt="d", cmap="Blues", xticklabels=["No Stroke", "Stroke"], yticklabels=["No Stroke", "Stroke"])
-plt.title("Confusion Matrix")
-plt.xlabel("Predicted")
-plt.ylabel("Actual")
-plt.savefig("visualisasi/confusion_matrix.png")
-plt.close()
+# Analyze stroke distribution
+stroke_dist = df.groupby('cluster')['stroke'].mean()
+print("\nDistribusi Stroke per Cluster:\n", stroke_dist)
 
-# ROC Curve visualization
-fpr, tpr, _ = roc_curve(y_test, y_prob)
-plt.figure(figsize=(6,5))
-plt.plot(fpr, tpr, color="darkorange", lw=2, label=f"AUC = {roc_auc_score(y_test, y_prob):.2f}")
-plt.plot([0,1], [0,1], color="navy", lw=2, linestyle="--")
-plt.xlabel("False Positive Rate")
-plt.ylabel("True Positive Rate")
-plt.title("ROC Curve")
-plt.legend(loc="lower right")
-plt.savefig("visualisasi/roc_curve.png")
-plt.close()
-
-# Feature Importance visualization
-importances = model.feature_importances_
-indices = np.argsort(importances)[::-1]
-features = X.columns
-plt.figure(figsize=(10,6))
-sns.barplot(x=importances[indices], y=features[indices])
-plt.title("Feature Importance - Random Forest")
-plt.tight_layout()
-plt.savefig("visualisasi/feature_importance.png")
-plt.close()
-
-# Print model evaluation results
-print("=== Evaluasi Model Random Forest ===")
-print(f"Akurasi     : {accuracy_score(y_test, y_pred):.4f}")
-print(f"Precision   : {precision_score(y_test, y_pred, zero_division=0):.4f}")
-print(f"Recall      : {recall_score(y_test, y_pred, zero_division=0):.4f}")
-print(f"F1-Score    : {f1_score(y_test, y_pred, zero_division=0):.4f}")
-print(f"AUC Score   : {roc_auc_score(y_test, y_prob):.4f}")
-print("\n=== Classification Report ===")
-print(classification_report(y_test, y_pred, zero_division=0))
+plt.figure(figsize=(6, 4))
+stroke_dist.plot(kind='bar')
+plt.title('Stroke Distribution per Cluster')
+plt.xlabel('Cluster')
+plt.ylabel('Mean Stroke')
+plt.savefig('visualisasi/stroke_distribution.png')
